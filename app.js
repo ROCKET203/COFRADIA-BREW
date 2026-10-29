@@ -104,7 +104,7 @@ function initLogin() {
     boot(data.user);
   });
 
-  db.auth.onAuthStateChange((_event, session) => { if (!session) location.reload(); });
+  db.auth.onAuthStateChange((event, session) => { if (event === 'SIGNED_OUT' && !session) location.reload(); });
 
   db.auth.getSession().then(({ data }) => { if (data.session) boot(data.session.user); });
 }
