@@ -1,34 +1,25 @@
 /* ============================================================
    Cofradía Brew · finanzas
-   Datos en localStorage del navegador. Sin backend.
+   Datos compartidos en Supabase (Postgres + Auth).
    ============================================================ */
 
 const CURRENCY = '$';                 // dólares. cámbialo a 'Q', '€', etc. si hace falta
-const KEY = 'cofradia-brew-v1';
-const SESSION = 'cofradia-brew-user';
 
-/* --- 3 accesos (cambia nombres y códigos aquí; ver README) --- */
-const USERS = [
-  { name: 'Rodrigo', hash: 'd6ada1ce10b0a0cbe77f4b6c325316187886bcc24589e9db1c811f90bae583e8' }, // cafe4821
-  { name: 'Socio 2', hash: '616a30a919b831cf63e4f550e0c875808a9f446c95b68e543d1a62228a6e5c55' }, // matcha7365
-  { name: 'Socio 3', hash: '27892cc2a8756b2685a82899889a37350f9ca7ddff7bcbfd8d80bd3e9a7fc7e7' }  // syrup9104
-];
+/* --- 1. Pega aquí los datos de tu proyecto -----------------
+   Supabase → Project Settings → API
+   (la "anon public key" es pública, va en el navegador a propósito)
+   ----------------------------------------------------------- */
+const SUPABASE_URL = 'https://TU-PROYECTO.supabase.co';
+const SUPABASE_KEY = 'TU_ANON_KEY';
 
-const SEED = [
-  { name: 'Café en grano', cat: 'Café', unit: 'g', qty: 0, cost: 0, min: 0 },
-  { name: 'Leche entera', cat: 'Leche', unit: 'ml', qty: 0, cost: 0, min: 0 },
-  { name: 'Leche de avena', cat: 'Leche', unit: 'ml', qty: 0, cost: 0, min: 0 },
-  { name: 'Matcha ceremonial', cat: 'Matcha', unit: 'g', qty: 0, cost: 0, min: 0 },
-  { name: 'Syrup vainilla', cat: 'Syrup', unit: 'ml', qty: 0, cost: 0, min: 0 },
-  { name: 'Syrup lavanda', cat: 'Syrup', unit: 'ml', qty: 0, cost: 0, min: 0 },
-  { name: 'Vasos 12oz', cat: 'Otro', unit: 'u', qty: 0, cost: 0, min: 0 }
-];
+const configured = !SUPABASE_URL.includes('TU-PROYECTO');
+const db = configured ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
 let state = { inventory: [], events: [] };
 
 /* ---------------- utilidades ---------------- */
 const $ = (sel, root = document) => root.querySelector(sel);
-const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const uid = () => crypto.randomUUID();
 const round = n => Math.round(n * 100) / 100;
 const num = v => Number(String(v).replace(',', '.')) || 0;
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -38,22 +29,45 @@ const money = n => {
 };
 const itemById = id => state.inventory.find(i => i.id === id);
 
-async function hashPin(pin) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('cofradia-brew|' + pin));
-  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+/* ---------------- base de datos ---------------- */
+let loadWarned = false;
+
+function fail(error) {
+  console.error(error);
+  alert('No se pudo guardar: ' + (error.message || error));
 }
 
-function save() { localStorage.setItem(KEY, JSON.stringify(state)); }
+function loadFail(error) {
+  console.error(error);
+  if (loadWarned) return;
+  loadWarned = true;
+  alert('No se pudieron cargar los datos: ' + (error.message || error));
+}
 
-function load() {
-  const raw = localStorage.getItem(KEY);
-  if (raw) {
-    try { state = JSON.parse(raw); } catch (e) { console.warn('datos corruptos, se reinician', e); }
-  } else {
-    state = { inventory: SEED.map(i => ({ ...i, id: uid() })), events: [] };
-  }
-  if (!Array.isArray(state.inventory) || !Array.isArray(state.events)) state = { inventory: [], events: [] };
-  save();
+async function dbWrite(table, row) {
+  const { error } = await db.from(table).upsert(row);
+  if (error) fail(error);
+}
+
+async function dbRemove(table, id) {
+  const { error } = await db.from(table).delete().eq('id', id);
+  if (error) fail(error);
+}
+
+const saveItem  = item => dbWrite('inventory', item);
+const saveEvent = ev => dbWrite('events', ev);
+
+async function load() {
+  const [inv, evs] = await Promise.all([
+    db.from('inventory').select('*').order('name'),
+    db.from('events').select('*').order('date', { ascending: false })
+  ]);
+  if (inv.error) return loadFail(inv.error);
+  if (evs.error) return loadFail(evs.error);
+
+  state.inventory = inv.data.map(i => ({ ...i, qty: Number(i.qty), cost: Number(i.cost), min: Number(i.min) }));
+  state.events = evs.data.map(e => ({ ...e, price: Number(e.price), used: e.used || [], extras: e.extras || [] }));
+  loadWarned = false;
 }
 
 /* ---------------- cálculos ---------------- */
@@ -68,41 +82,57 @@ function costs(ev) {
 
 const profit = ev => num(ev.price) - costs(ev).total;
 
-/* ---------------- login ---------------- */
+/* ---------------- login (Supabase Auth) ---------------- */
 function initLogin() {
-  $('#loginUser').innerHTML = USERS.map(u => `<option>${esc(u.name)}</option>`).join('');
+  if (!configured) {
+    $('#loginError').textContent = 'Falta configurar SUPABASE_URL y SUPABASE_KEY en app.js';
+    return;
+  }
 
   $('#loginForm').addEventListener('submit', async e => {
     e.preventDefault();
-    const user = USERS.find(u => u.name === $('#loginUser').value);
-    const pin = $('#loginPin').value.trim();
-    const ok = user && (await hashPin(pin)) === user.hash;
-    if (!ok) {
-      $('#loginError').textContent = 'Código incorrecto';
+    $('#loginError').textContent = 'Entrando…';
+    const { data, error } = await db.auth.signInWithPassword({
+      email: $('#loginEmail').value.trim(),
+      password: $('#loginPin').value
+    });
+    if (error) {
+      $('#loginError').textContent = 'Correo o contraseña incorrectos';
       $('#loginPin').value = '';
       return;
     }
-    sessionStorage.setItem(SESSION, user.name);
-    boot(user.name);
+    boot(data.user);
   });
 
-  const saved = sessionStorage.getItem(SESSION);
-  if (saved && USERS.some(u => u.name === saved)) boot(saved);
+  db.auth.onAuthStateChange((_event, session) => { if (!session) location.reload(); });
+
+  db.auth.getSession().then(({ data }) => { if (data.session) boot(data.session.user); });
 }
 
-function boot(name) {
+async function boot(user) {
   $('#login').hidden = true;
   $('#app').hidden = false;
-  $('#who').textContent = name;
-  load();
+  $('#who').textContent = user.user_metadata?.name || user.email.split('@')[0];
+  await load();
   renderAll();
 }
+
+async function refresh() {
+  if ($('#app').hidden) return;
+  await load();
+  renderAll();
+}
+
+/* al volver a la app, jala los cambios de los otros usuarios */
+window.addEventListener('focus', refresh);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 
 /* ---------------- navegación ---------------- */
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === tab));
     document.querySelectorAll('.view').forEach(v => { v.hidden = v.id !== tab.dataset.tab; });
+    refresh();
   });
 });
 
@@ -166,7 +196,7 @@ function renderInventory() {
 $('#invForm').addEventListener('submit', e => {
   e.preventDefault();
   const f = new FormData(e.target);
-  state.inventory.push({
+  const item = {
     id: uid(),
     name: (f.get('name') || '').trim(),
     cat: f.get('cat'),
@@ -174,8 +204,10 @@ $('#invForm').addEventListener('submit', e => {
     qty: num(f.get('qty')),
     cost: num(f.get('cost')),
     min: num(f.get('min'))
-  });
-  save(); e.target.reset(); $('[name=unit]', e.target).value = 'g';
+  };
+  state.inventory.push(item);
+  saveItem(item);
+  e.target.reset(); $('[name=unit]', e.target).value = 'g';
   renderAll();
 });
 
@@ -185,7 +217,8 @@ $('#invTable').addEventListener('change', e => {
   if (!item) return;
   const field = el.dataset.field;
   item[field] = field === 'name' || field === 'unit' || field === 'cat' ? el.value : round(num(el.value));
-  save(); renderAll();
+  saveItem(item);
+  renderAll();
 });
 
 $('#invTable').addEventListener('click', e => {
@@ -194,14 +227,15 @@ $('#invTable').addEventListener('click', e => {
   const item = itemById(id);
   if (!confirm(`¿Borrar "${item.name}"? Los eventos que lo usan perderán ese costo.`)) return;
   state.inventory = state.inventory.filter(i => i.id !== id);
-  save(); renderAll();
+  dbRemove('inventory', id);
+  renderAll();
 });
 
 /* ---------------- eventos ---------------- */
 $('#eventForm').addEventListener('submit', e => {
   e.preventDefault();
   const f = new FormData(e.target);
-  state.events.push({
+  const ev = {
     id: uid(),
     name: (f.get('name') || '').trim(),
     date: f.get('date'),
@@ -209,8 +243,10 @@ $('#eventForm').addEventListener('submit', e => {
     price: num(f.get('price')),
     used: [],
     extras: []
-  });
-  save(); e.target.reset();
+  };
+  state.events.push(ev);
+  saveEvent(ev);
+  e.target.reset();
   renderAll();
 });
 
@@ -295,10 +331,12 @@ $('#events').addEventListener('submit', e => {
     if (qty > item.qty && !confirm(`Solo hay ${item.qty} ${item.unit} de ${item.name}. ¿Registrar igual?`)) return;
     item.qty = round(item.qty - qty);
     ev.used.push({ itemId: item.id, qty });
+    saveItem(item);
   } else {
     ev.extras.push({ label: (f.get('label') || 'Gasto').trim(), amount: round(num(f.get('amount'))) });
   }
-  save(); renderAll();
+  saveEvent(ev);
+  renderAll();
 });
 
 $('#events').addEventListener('click', e => {
@@ -310,28 +348,33 @@ $('#events').addEventListener('click', e => {
     const idx = Number(b.dataset.delUsed);
     const u = ev.used[idx];
     const item = itemById(u.itemId);
-    if (item) item.qty = round(item.qty + u.qty); // devuelve stock
+    if (item) { item.qty = round(item.qty + u.qty); saveItem(item); } // devuelve stock
     ev.used.splice(idx, 1);
+    saveEvent(ev);
   } else if (b.dataset.delExtra !== undefined && ev) {
     ev.extras.splice(Number(b.dataset.delExtra), 1);
+    saveEvent(ev);
   } else if (b.dataset.delEvent) {
     const target = state.events.find(x => x.id === b.dataset.delEvent);
     if (!target) return;
     if (!confirm(`¿Borrar "${target.name}"? Se devuelve el stock de sus insumos.`)) return;
     target.used.forEach(u => {
       const item = itemById(u.itemId);
-      if (item) item.qty = round(item.qty + u.qty);
+      if (item) { item.qty = round(item.qty + u.qty); saveItem(item); }
     });
     state.events = state.events.filter(x => x.id !== target.id);
+    dbRemove('events', target.id);
   } else {
     return;
   }
-  save(); renderAll();
+  renderAll();
 });
 
 /* ---------------- datos / respaldo ---------------- */
-$('#logoutBtn').addEventListener('click', () => {
-  sessionStorage.removeItem(SESSION);
+$('#refreshBtn').addEventListener('click', refresh);
+
+$('#logoutBtn').addEventListener('click', async () => {
+  await db.auth.signOut();
   location.reload();
 });
 
@@ -351,8 +394,31 @@ $('#importFile').addEventListener('change', async e => {
   try {
     const data = JSON.parse(await file.text());
     if (!Array.isArray(data.inventory) || !Array.isArray(data.events)) throw new Error('formato');
-    if (!confirm('Esto reemplaza los datos de este navegador. ¿Continuar?')) return;
-    state = data; save(); renderAll();
+    if (!confirm('Esto reemplaza el inventario y los eventos de TODOS los usuarios. ¿Continuar?')) return;
+
+    // ids nuevos, remapeando los insumos usados por los eventos
+    const map = new Map();
+    const items = data.inventory.map(i => {
+      const id = uid();
+      map.set(i.id, id);
+      return { id, name: String(i.name || 'Insumo'), cat: i.cat || 'Otro', unit: i.unit || 'u', qty: num(i.qty), cost: num(i.cost), min: num(i.min) };
+    });
+    const events = data.events.map(ev => ({
+      id: uid(),
+      name: String(ev.name || 'Evento'),
+      date: ev.date,
+      place: ev.place || '',
+      price: num(ev.price),
+      used: (ev.used || []).map(u => ({ itemId: map.get(u.itemId) || u.itemId, qty: num(u.qty) })),
+      extras: (ev.extras || []).map(x => ({ label: String(x.label || 'Gasto'), amount: num(x.amount) }))
+    }));
+
+    await db.from('events').delete().not('id', 'is', null);
+    await db.from('inventory').delete().not('id', 'is', null);
+    if (items.length) await db.from('inventory').insert(items);
+    if (events.length) await db.from('events').insert(events);
+
+    await refresh();
     $('#dataMsg').textContent = 'Datos importados.';
   } catch {
     alert('Archivo inválido: debe ser un JSON exportado por esta app.');
@@ -360,12 +426,12 @@ $('#importFile').addEventListener('change', async e => {
   e.target.value = '';
 });
 
-$('#resetBtn').addEventListener('click', () => {
-  if (!confirm('Se borran inventario y eventos de este navegador. ¿Seguro?')) return;
-  localStorage.removeItem(KEY);
-  state = { inventory: SEED.map(i => ({ ...i, id: uid() })), events: [] };
-  save(); renderAll();
-  $('#dataMsg').textContent = 'Datos reiniciados.';
+$('#resetBtn').addEventListener('click', async () => {
+  if (!confirm('Esto borra inventario y eventos de TODOS los usuarios. ¿Seguro?')) return;
+  await db.from('events').delete().not('id', 'is', null);
+  await db.from('inventory').delete().not('id', 'is', null);
+  await refresh();
+  $('#dataMsg').textContent = 'Base de datos vacía.';
 });
 
 /* arranque */

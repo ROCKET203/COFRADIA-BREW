@@ -1,7 +1,8 @@
 # Cofradía Brew · finanzas
 
 App web para la barra móvil de café y matcha: inventario, eventos y ganancia real por evento.
-HTML + CSS + JavaScript puro, sin dependencias ni build. Funciona en GitHub Pages.
+HTML + CSS + JavaScript puro. Los datos se guardan en **Supabase** (Postgres + Auth), así que
+los 3 usuarios ven la misma información desde cualquier dispositivo.
 
 ## Archivos
 
@@ -9,94 +10,69 @@ HTML + CSS + JavaScript puro, sin dependencias ni build. Funciona en GitHub Page
 |---|---|
 | `index.html` | Estructura (login, resumen, inventario, eventos, datos) |
 | `styles.css` | Estilos |
-| `app.js` | Toda la lógica y el almacenamiento |
+| `app.js` | Lógica + conexión a Supabase |
+| `supabase/schema.sql` | Tablas, seguridad (RLS) e inventario inicial |
 | `server.js` | Solo para probar en tu compu: `node server.js` → http://localhost:4173 |
 
 ## Qué incluye
 
 - **Inventario**: café, leche, matcha, syrups, otros. Stock, stock mínimo, costo unitario y unidad (g / ml / u). Se edita en la tabla y se guarda solo.
 - **Eventos**: nombre, fecha, lugar y cobro al cliente.
-- **Detalle por evento**: insumos usados (descuenta stock automáticamente y lo devuelve si lo borras) + gastos extra (transporte, meseros, hielo…).
-- **Ganancia**: ingreso − (insumos + gastos extra), en el evento y en el resumen general.
+- **Detalle por evento**: insumos usados (descuenta stock y lo devuelve si borras la línea) + gastos extra.
+- **Ganancia**: cobro − (insumos + extras), en el evento, en la tabla y en el resumen.
 - **Resumen**: ingresos, gastos, ganancia y alerta de stock bajo.
-- **Datos**: exportar / importar JSON y borrar todo.
+- **Datos**: exportar / importar JSON y vaciar la base.
+- Todo el dinero en **dólares** (`const CURRENCY = '$'` en `app.js` si algún día cambia).
 
-Todo el dinero se muestra en **dólares**. Si algún día cambias de moneda, es una línea en `app.js`:
-`const CURRENCY = '$';`
+## Configurar Supabase (una sola vez)
 
-## Accesos (3 personas)
+1. Crea una cuenta en `https://supabase.com` y un proyecto nuevo (plan free). Guarda la contraseña de la base.
+2. En el proyecto: **SQL Editor → New query** → pega todo el contenido de `supabase/schema.sql` → **Run**.
+   Eso crea las tablas `inventory` y `events`, deja la seguridad activada (solo usuarios con sesión)
+   y carga 7 insumos de ejemplo.
+3. **Authentication → Users → Add user → Create new user**: crea los 3 usuarios con correo y contraseña.
+   Marca *Auto Confirm User* para que puedan entrar de inmediato. (Opcional: en *User Metadata*
+   pon `{"name":"Rodrigo"}` para que el saludo use ese nombre.)
+4. **Project Settings → API**: copia `Project URL` y la llave `anon public`.
+5. En `app.js`, líneas 13-14:
 
-Los códigos están en `app.js`, en la constante `USERS`:
-
-| Usuario | Código inicial |
-|---|---|
-| Rodrigo | `cafe4821` |
-| Socio 2 | `matcha7365` |
-| Socio 3 | `syrup9104` |
-
-Cámbialos antes de publicar. El archivo guarda el **hash** del código, no el código.
-Para generar uno nuevo, con Node instalado:
-
-```powershell
-node -e "const c=require('crypto');console.log(c.createHash('sha256').update('cofradia-brew|TU_CODIGO_NUEVO').digest('hex'))"
+```js
+const SUPABASE_URL = 'https://tuproyecto.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOi...';   // anon public
 ```
 
-Copia el resultado en el `hash` del usuario correspondiente (también puedes cambiar el `name`).
-La sesión vive en `sessionStorage`: al cerrar el navegador se pide el código otra vez.
+6. Verifica que los 3 correos estén en *Authentication → Providers → Email* habilitado
+   (lo está por defecto). Si más adelante activas "Confirm email", avísame porque cambia el flujo.
 
-> **Ojo con la seguridad.** Un sitio estático no puede proteger datos de verdad: el código es visible
-> para quien abra el repositorio y un código corto se puede adivinar. Sirve como "cerradura de la puerta".
-> Si necesitas candado real (y datos compartidos), usa **Cloudflare Access** (gratis hasta 50 usuarios)
-> delante de Cloudflare Pages, o un backend pequeño tipo Supabase.
+Una vez configurado, quien abra el enlace sin cuenta solo ve la pantalla de login: la base
+rechaza cualquier lectura sin sesión gracias a las políticas RLS del `schema.sql`.
 
-## Dónde se guardan los datos
+## Datos compartidos
 
-En el `localStorage` **de cada navegador**. Es decir: cada persona ve sus propios datos, y si borras
-datos del navegador se pierden. Por eso:
+- Los 3 usuarios ven lo mismo. La app recarga al volver a la pestaña y con el botón **Actualizar**.
+- Si dos personas editan el mismo insumo al mismo tiempo, gana el último guardado.
+- El respaldo (`Exportar JSON`) sí es por navegador: úsalo para tener copia fuera de Supabase.
 
-1. Usen **un solo dispositivo** (la tablet/laptop del negocio) para llevar todo, o
-2. Exporten el JSON al terminar cada evento y lo importen en el otro equipo.
+## Subirlo a GitHub Pages
 
-Si quieren que los 3 vean los mismos datos en tiempo real, hay que agregar una base de datos
-(Supabase free es la vía corta: 2 tablas, `inventory` y `events`).
-
-## Subirlo a GitHub Pages (paso a paso)
-
-1. Crea un repositorio **público** en GitHub, por ejemplo `cofradia-brew`.
-2. En esta carpeta (mejor cópiala fuera de OneDrive, ej. `C:\dev\cofradia-brew`, para evitar conflictos de sincronización):
+Repo: `https://github.com/ROCKET203/COFRADIA-BREW` (público) · rama `main` · carpeta `/ (root)`.
 
 ```powershell
 cd "C:\dev\cofradia-brew"
-git init
-git add .
-git commit -m "Cofradia Brew finanzas"
-git branch -M main
-git remote add origin https://github.com/TU_USUARIO/cofradia-brew.git
-git push -u origin main
-```
-
-3. En GitHub: **Settings → Pages**.
-4. En *Source* elige **Deploy from a branch**, *Branch*: `main`, carpeta `/ (root)` y **Save**.
-5. Espera 1–2 minutos. Tu enlace queda en:
-
-```
-https://TU_USUARIO.github.io/cofradia-brew/
-```
-
-Ese es el enlace que compartes con las otras 2 personas.
-
-Para actualizar después de un cambio:
-
-```powershell
-git add .
-git commit -m "cambios"
+git add -A
+git commit -m "descripcion del cambio"
 git push
 ```
 
-GitHub Pages publica solo en la rama `main`; no pongas contraseñas reales en el repo.
+Espera 1–2 minutos y refresca con **Ctrl + Shift + R**.
+Enlace: `https://rocket203.github.io/COFRADIA-BREW/`
 
-## Ideas para después (fáciles de agregar)
+## Problemas comunes
 
-- Gastos fijos mensuales (renta, permisos) para una ganancia neta real.
-- Recetas por bebida: registrar "12 matcha lattes" y que descuente insumos automáticamente.
-- Comparar precio cobrado vs. costo para saber el margen por evento.
+| Síntoma | Causa / arreglo |
+|---|---|
+| "Falta configurar SUPABASE_URL y SUPABASE_KEY" | Faltan las 2 líneas del paso 5 |
+| "Correo o contraseña incorrectos" con la clave correcta | Usuario sin confirmar (Authentication → Users) |
+| "No se pudieron cargar los datos: permission denied" | Falta correr el `schema.sql` (políticas RLS) |
+| Los otros no ven mis cambios | Toca **Actualizar** o cambia de pestaña y vuelve |
+| 404 en el enlace | Pages debe estar en `main` + `/ (root)` |

@@ -14,11 +14,11 @@
       <h1>Cofradía Brew</h1>
       <p class="muted">Acceso privado · café & matcha para eventos</p>
 
-      <label for="loginUser">Usuario</label>
-      <select id="loginUser" required></select>
+      <label for="loginEmail">Correo</label>
+      <input id="loginEmail" type="email" autocomplete="username" required>
 
-      <label for="loginPin">Código</label>
-      <input id="loginPin" type="password" autocomplete="off" required>
+      <label for="loginPin">Contraseña</label>
+      <input id="loginPin" type="password" autocomplete="current-password" required>
 
       <button class="btn primary" type="submit">Entrar</button>
       <p id="loginError" class="error"></p>
@@ -34,6 +34,7 @@
       </div>
       <div class="topbar-right">
         <span id="who" class="badge"></span>
+        <button id="refreshBtn" class="btn ghost" type="button">Actualizar</button>
         <button id="logoutBtn" class="btn ghost" type="button">Salir</button>
       </div>
     </header>
@@ -110,20 +111,23 @@
 
     <!-- DATOS -->
     <section id="view-datos" class="view" hidden>
-      <h2>Respaldo de datos</h2>
-      <p class="muted">Los datos viven en este navegador. Exporta un archivo para respaldar o para pasar la información a otro dispositivo.</p>
+      <h2>Datos compartidos</h2>
+      <p class="muted">Todo se guarda en Supabase: los 3 usuarios ven el mismo inventario y los mismos eventos.
+        Exporta un JSON de vez en cuando como respaldo.</p>
       <div class="row-form">
         <button id="exportBtn" class="btn primary" type="button">Exportar JSON</button>
         <label class="btn ghost file-btn">
           Importar JSON
           <input id="importFile" type="file" accept="application/json" hidden>
         </label>
-        <button id="resetBtn" class="btn danger" type="button">Borrar todo</button>
+        <button id="resetBtn" class="btn danger" type="button">Vaciar base de datos</button>
       </div>
       <p id="dataMsg" class="muted small"></p>
+      <p class="muted small">Importar y vaciar afectan a los 3 usuarios, no solo a este navegador.</p>
     </section>
   </main>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="app.js"></script>
 </body>
 </html>
