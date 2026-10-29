@@ -9,8 +9,8 @@ const CURRENCY = '$';                 // dólares. cámbialo a 'Q', '€', etc. 
    Supabase → Project Settings → API
    (la "anon public key" es pública, va en el navegador a propósito)
    ----------------------------------------------------------- */
-const SUPABASE_URL = 'https://TU-PROYECTO.supabase.co';
-const SUPABASE_KEY = 'TU_ANON_KEY';
+const SUPABASE_URL = 'https://hzmyekofxdzdystkryzr.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_dOaiokT5DecHNp1Z1rhQ9w_zisgdT7U';
 
 const configured = !SUPABASE_URL.includes('TU-PROYECTO');
 const db = configured ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
